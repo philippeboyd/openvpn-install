@@ -43,6 +43,11 @@ else
 fi
 
 newclient () {
+	# Assign Static IP
+	echo "ifconfig-push $2 255.255.255.0" > /etc/openvpn/ccd/$1
+	chown -R nobody:nogroup /etc/openvpn/ccd
+	echo "$1,$2" >> /etc/openvpn/ipp.txt
+
 	# Generates the custom client.ovpn
 	cp /etc/openvpn/client-common.txt ~/$1.ovpn
 	echo "<ca>" >> ~/$1.ovpn
@@ -78,13 +83,13 @@ if [[ -e /etc/openvpn/server.conf ]]; then
 		echo "   2) Revoke an existing user"
 		echo "   3) Remove OpenVPN"
 		echo "   4) Exit"
-		read -p "Select an option [1-4]: " option
+		[[ -n "$option" ]] && echo "Using option $option" || read -p "Select an option [1-4]: " option
 		case $option in
 			1) 
 			echo ""
 			echo "Tell me a name for the client certificate"
 			echo "Please, use one word only, no special characters"
-			read -p "Client name: " -e -i client CLIENT
+			[[ -n "$CLIENT" ]] && echo "Using CLIENT $CLIENT" || read -p "Client name: " -e -i client CLIENT
 			cd /etc/openvpn/easy-rsa/
 			./easyrsa build-client-full $CLIENT nopass
 			# Generates the custom client.ovpn
@@ -106,9 +111,9 @@ if [[ -e /etc/openvpn/server.conf ]]; then
 			echo "Select the existing client certificate you want to revoke"
 			tail -n +2 /etc/openvpn/easy-rsa/pki/index.txt | grep "^V" | cut -d '=' -f 2 | nl -s ') '
 			if [[ "$NUMBEROFCLIENTS" = '1' ]]; then
-				read -p "Select one client [1]: " CLIENTNUMBER
+				[[ -n "$CLIENTNUMBER" ]] && echo "Using CLIENTNUMBER $CLIENTNUMBER" || read -p "Select one client [1]: " CLIENTNUMBER
 			else
-				read -p "Select one client [1-$NUMBEROFCLIENTS]: " CLIENTNUMBER
+				[[ -n "$CLIENTNUMBER" ]] && echo "Using CLIENTNUMBER $CLIENTNUMBER" || read -p "Select one client [1-$NUMBEROFCLIENTS]: " CLIENTNUMBER
 			fi
 			CLIENT=$(tail -n +2 /etc/openvpn/easy-rsa/pki/index.txt | grep "^V" | cut -d '=' -f 2 | sed -n "$CLIENTNUMBER"p)
 			cd /etc/openvpn/easy-rsa/
@@ -127,7 +132,7 @@ if [[ -e /etc/openvpn/server.conf ]]; then
 			;;
 			3) 
 			echo ""
-			read -p "Do you really want to remove OpenVPN? [y/n]: " -e -i n REMOVE
+			[[ -n "$REMOVE" ]] && echo "Using REMOVE $REMOVE" || read -p "Do you really want to remove OpenVPN? [y/n]: " -e -i n REMOVE
 			if [[ "$REMOVE" = 'y' ]]; then
 				PORT=$(grep '^port ' /etc/openvpn/server.conf | cut -d " " -f 2)
 				PROTOCOL=$(grep '^proto ' /etc/openvpn/server.conf | cut -d " " -f 2)
@@ -187,12 +192,12 @@ else
 	echo ""
 	echo "First I need to know the IPv4 address of the network interface you want OpenVPN"
 	echo "listening to."
-	read -p "IP address: " -e -i $IP IP
+	[[ -n "$IP" ]] && echo "Using IP $IP" || read -p "IP address: " -e -i $IP IP
 	echo ""
 	echo "Which protocol do you want for OpenVPN connections?"
 	echo "   1) UDP (recommended)"
 	echo "   2) TCP"
-	read -p "Protocol [1-2]: " -e -i 1 PROTOCOL
+	[[ -n "$PROTOCOL" ]] && echo "Using PROTOCOL $PROTOCOL" || read -p "Protocol [1-2]: " -e -i 1 PROTOCOL
 	case $PROTOCOL in
 		1) 
 		PROTOCOL=udp
@@ -203,7 +208,7 @@ else
 	esac
 	echo ""
 	echo "What port do you want OpenVPN listening to?"
-	read -p "Port: " -e -i 1194 PORT
+	[[ -n "$PORT" ]] && echo "Using PORT $PORT" || read -p "Port: " -e -i 1194 PORT
 	echo ""
 	echo "Which DNS do you want to use with the VPN?"
 	echo "   1) Current system resolvers"
@@ -212,14 +217,14 @@ else
 	echo "   4) NTT"
 	echo "   5) Hurricane Electric"
 	echo "   6) Verisign"
-	read -p "DNS [1-6]: " -e -i 1 DNS
+	[[ -n "$DNS" ]] && echo "Using DNS $DNS" || read -p "DNS [1-6]: " -e -i 1 DNS
 	echo ""
 	echo "Finally, tell me your name for the client certificate"
 	echo "Please, use one word only, no special characters"
-	read -p "Client name: " -e -i client CLIENT
+	[[ -n "$CLIENT" ]] && echo "Using CLIENT $CLIENT" || read -p "Client name: " -e -i client CLIENT
 	echo ""
 	echo "Okay, that was all I needed. We are ready to setup your OpenVPN server now"
-	read -n1 -r -p "Press any key to continue..."
+	[[ -n "$NON_INTERACTIVE" ]] && echo "Continuing..." || read -n1 -r -p "Press any key to continue..."
 	if [[ "$OS" = 'debian' ]]; then
 		apt-get update
 		apt-get install openvpn iptables openssl ca-certificates -y
@@ -268,7 +273,8 @@ tls-auth ta.key 0
 topology subnet
 server 10.8.0.0 255.255.255.0
 ifconfig-pool-persist ipp.txt" > /etc/openvpn/server.conf
-	echo 'push "redirect-gateway def1 bypass-dhcp"' >> /etc/openvpn/server.conf
+	# Removed redirect-gateway from the following config
+	echo 'push "def1 bypass-dhcp"' >> /etc/openvpn/server.conf
 	# DNS
 	case $DNS in
 		1) 
@@ -313,7 +319,9 @@ persist-key
 persist-tun
 status openvpn-status.log
 verb 3
-crl-verify crl.pem" >> /etc/openvpn/server.conf
+crl-verify crl.pem
+client-config-dir /etc/openvpn/ccd" >> /etc/openvpn/server.conf
+	mkdir -p /etc/openvpn/ccd
 	# Enable net.ipv4.ip_forward for the system
 	sed -i '/\<net.ipv4.ip_forward\>/c\net.ipv4.ip_forward=1' /etc/sysctl.conf
 	if ! grep -q "\<net.ipv4.ip_forward\>" /etc/sysctl.conf; then
@@ -392,7 +400,7 @@ exit 0' > $RCLOCAL
 		echo ""
 		echo "If your server is NATed (e.g. LowEndSpirit), I need to know the external IP"
 		echo "If that's not the case, just ignore this and leave the next field blank"
-		read -p "External IP: " -e USEREXTERNALIP
+		[[ -n "$USEREXTERNALIP" ]] && echo "Using USEREXTERNALIP $USEREXTERNALIP" || read -p "External IP: " -e USEREXTERNALIP
 		if [[ "$USEREXTERNALIP" != "" ]]; then
 			IP=$USEREXTERNALIP
 		fi
@@ -416,7 +424,7 @@ setenv opt block-outside-dns
 key-direction 1
 verb 3" > /etc/openvpn/client-common.txt
 	# Generates the custom client.ovpn
-	newclient "$CLIENT"
+	newclient "$CLIENT" "$STATIC_IP"
 	echo ""
 	echo "Finished!"
 	echo ""
